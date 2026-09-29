@@ -17,4 +17,9 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# /health ya hace ping a Mongo, asi que un 503 aqui es "Mongo no responde".
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/health')"]
+
+# Forma shell (no exec) para que el puerto venga del entorno (12-Factor VII).
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}

@@ -3,6 +3,7 @@
 import uuid
 
 from motor.motor_asyncio import AsyncIOMotorCollection
+from pymongo.errors import DuplicateKeyError
 
 from persistence.exceptions import (
     DocumentNotFoundError,
@@ -26,14 +27,28 @@ class DocumentRepository:
     ) -> AsyncIOMotorCollection:
         return connection.get_database()[collection_name]
 
+    async def ensure_indexes(self) -> None:
+        """Crea el índice único de checksum; el checksum es la identidad de duplicado.
+
+        El `find_one` de `create` es solo el camino rápido: entre esa lectura y
+        el `insert_one` cabe otra request con el mismo checksum. El índice
+        único es lo que vuelve esa carrera imposible.
+        """
+        await self._collection.create_index("checksum", unique=True)
+
     async def create(self, doc_id: str | None, content: str, checksum: str) -> dict:
         if await self._collection.find_one({"checksum": checksum}):
             raise DuplicateDocumentError(checksum)
 
         document_id = doc_id or str(uuid.uuid4())
-        await self._collection.insert_one(
-            {"_id": document_id, "content": content, "checksum": checksum}
-        )
+        try:
+            await self._collection.insert_one(
+                {"_id": document_id, "content": content, "checksum": checksum}
+            )
+        except DuplicateKeyError as error:
+            # Carrera real: otra request insertó el mismo checksum entre el
+            # find_one y este insert_one. El índice único la cortó.
+            raise DuplicateDocumentError(checksum) from error
         return {"id": document_id, "content": content, "checksum": checksum}
 
     async def list_all(self) -> list[dict]:
@@ -59,7 +74,7 @@ class DocumentRepository:
             k: v for k, v in {"content": content, "checksum": checksum}.items() if v is not None
         }
         if not update_data:
-            raise InvalidUpdateError
+            raise InvalidUpdateError()
 
         result = await self._collection.update_one({"_id": document_id}, {"$set": update_data})
         if result.matched_count == 0:

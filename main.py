@@ -5,19 +5,29 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError
+from shared.web.cors import add_cors
+from shared.web.logging import RequestIdMiddleware, setup_logging
 
 from persistence.mongodb_connection import mongodb_connection
-from routes import router
+from routes import get_repository, router
+
+SERVICE_NAME = "persistence-service"
+
+setup_logging(SERVICE_NAME)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await mongodb_connection.connect()
+    await get_repository().ensure_indexes()
     yield
     await mongodb_connection.disconnect()
 
 
 app = FastAPI(title="Document Persistence Service", version="1.0.0", lifespan=lifespan)
+
+add_cors(app)
+app.add_middleware(RequestIdMiddleware)
 
 
 @app.get("/health")

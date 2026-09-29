@@ -8,10 +8,29 @@ from fastapi.testclient import TestClient
 from pymongo.errors import ServerSelectionTimeoutError
 
 import main
-import routes
-from persistence.exceptions import DocumentNotFoundError, DuplicateDocumentError
+from persistence.exceptions import (
+    DocumentNotFoundError,
+    DuplicateDocumentError,
+    PersistenceError,
+)
+from routes import get_repository
 
 client = TestClient(main.app)
+
+
+class UnknownDomainError(PersistenceError):
+    """Error de dominio que el traductor no conoce: no puede filtrarse como None."""
+
+
+class FakeIndexCollection:
+    """Colección mínima que solo registra los índices creados en el startup."""
+
+    def __init__(self) -> None:
+        self.indexes: list[tuple[str, bool]] = []
+
+    async def create_index(self, field: str, unique: bool = False) -> str:
+        self.indexes.append((field, unique))
+        return f"{field}_{1 if unique else ''}"
 
 
 def _make_fake_repo():
@@ -65,11 +84,25 @@ def _make_fake_repo():
     return repo
 
 
+@pytest.fixture
+def mongo_collection() -> FakeIndexCollection:
+    return FakeIndexCollection()
+
+
 @pytest.fixture(autouse=True)
-def fake_repository(monkeypatch):
-    routes.repository = _make_fake_repo()
+def fake_repository(monkeypatch, mongo_collection):
+    """Sustituye el repositorio por la dependencia, sin tocar atributos de módulo."""
+    repo = _make_fake_repo()
+    main.app.dependency_overrides[get_repository] = lambda: repo
     monkeypatch.setattr(main.mongodb_connection, "connect", AsyncMock(return_value=None))
-    yield
+    monkeypatch.setattr(main.mongodb_connection, "disconnect", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        main.mongodb_connection,
+        "get_database",
+        lambda: {"documents": mongo_collection},
+    )
+    yield repo
+    main.app.dependency_overrides.clear()
 
 
 def test_health_check():
@@ -150,3 +183,46 @@ def test_delete_document():
 
     get_response = client.get(f"/documents/{created['id']}")
     assert get_response.status_code == 404
+
+
+def test_lifespan_creates_unique_checksum_index(mongo_collection):
+    with TestClient(main.app):
+        pass
+
+    assert mongo_collection.indexes == [("checksum", True)]
+
+
+def test_unknown_domain_error_becomes_500(fake_repository):
+    fake_repository.get.side_effect = UnknownDomainError("algo nuevo")
+
+    response = client.get("/documents/any-id")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Internal persistence error"
+
+
+def test_non_domain_error_is_not_swallowed(fake_repository):
+    """El raise final deja subir el error en vez de devolver None en silencio."""
+    fake_repository.get.side_effect = RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        client.get("/documents/any-id")
+
+
+def test_request_id_is_echoed_in_response_header():
+    response = client.get("/health", headers={"X-Request-Id": "trace-123"})
+
+    assert response.headers["X-Request-Id"] == "trace-123"
+
+
+def test_cors_preflight_allows_configured_origin():
+    response = client.options(
+        "/documents",
+        headers={
+            "Origin": "http://localhost",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost"

@@ -1,6 +1,7 @@
 """Conexión a MongoDB: configuración vía pydantic-settings y ciclo de vida."""
 
 from typing import Optional, Self
+from urllib.parse import quote
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pydantic_settings import BaseSettings
@@ -15,8 +16,10 @@ class MongoSettings(BaseSettings):
     mongodb_auth_source: str = "admin"
 
     def build_url(self) -> str:
-        user = self.mongodb_root_username
-        password = self.mongodb_root_password
+        # La credencial va percent-encoded: un password con @, : o / cortaría
+        # la URL en el userinfo y la conexión apuntaría a otro host o usuario.
+        user = quote(self.mongodb_root_username, safe="")
+        password = quote(self.mongodb_root_password, safe="")
         host = self.mongodb_host
         port = self.mongodb_port
         db_name = self.mongodb_database_name

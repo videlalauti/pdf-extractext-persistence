@@ -1,8 +1,10 @@
 """Tests unitarios de DocumentRepository contra una colección Motor falsa en memoria."""
 
+import asyncio
 from dataclasses import dataclass
 
 import pytest
+from pymongo.errors import DuplicateKeyError
 
 from persistence.exceptions import (
     DocumentNotFoundError,
@@ -24,12 +26,26 @@ class _FakeDeleteResult:
 
 
 class FakeCollection:
-    """Implementa el subconjunto de AsyncIOMotorCollection que usa DocumentRepository."""
+    """Implementa el subconjunto de AsyncIOMotorCollection que usa DocumentRepository.
+
+    `insert_one` respeta el índice único en checksum *solo* si `create_index`
+    se llamó antes, igual que en Mongo: sin el índice el fake deja pasar
+    duplicados y el repositorio se apoya en su `find_one`.
+    """
 
     def __init__(self) -> None:
         self.docs: dict[str, dict] = {}
+        self.indexes: dict[str, bool] = {}
+
+    async def create_index(self, field: str, unique: bool = False) -> str:
+        self.indexes[field] = unique
+        return f"{field}_{1 if unique else ''}"
 
     async def insert_one(self, document: dict) -> None:
+        if self.indexes.get("checksum") and any(
+            doc["checksum"] == document["checksum"] for doc in self.docs.values()
+        ):
+            raise DuplicateKeyError(f"checksum {document['checksum']} ya indexado")
         self.docs[str(document["_id"])] = dict(document)
 
     async def find_one(self, query: dict) -> dict | None:
@@ -52,6 +68,19 @@ class FakeCollection:
     async def delete_one(self, query: dict) -> _FakeDeleteResult:
         existed = self.docs.pop(str(query["_id"]), None) is not None
         return _FakeDeleteResult(deleted_count=1 if existed else 0)
+
+
+class RacingCollection(FakeCollection):
+    """Colección donde el documento competidor ya está pero `find_one` no lo ve.
+
+    Es la ventana real entre el `find_one` y el `insert_one` de dos requests
+    concurrentes con el mismo checksum: sin índice único, ambos insertan.
+    """
+
+    async def find_one(self, query: dict) -> dict | None:
+        if "checksum" in query:
+            return None
+        return await super().find_one(query)
 
 
 class FakeConnection:
@@ -98,6 +127,77 @@ async def test_create_duplicate_checksum_raises_duplicate(repository, collection
         await repository.create("doc-2", "second", "abc123")
 
     assert list(collection.docs) == ["doc-1"]
+
+
+@pytest.mark.anyio
+async def test_ensure_indexes_creates_unique_index_on_checksum(repository, collection):
+    await repository.ensure_indexes()
+
+    assert collection.indexes == {"checksum": True}
+
+
+@pytest.mark.anyio
+async def test_ensure_indexes_is_idempotent(repository, collection):
+    await repository.ensure_indexes()
+    await repository.ensure_indexes()
+
+    assert collection.indexes == {"checksum": True}
+
+
+@pytest.mark.anyio
+async def test_create_translates_duplicate_key_error_on_checksum_race():
+    """La carrera entre find_one e insert_one la corta el índice único."""
+    collection = RacingCollection()
+    collection.docs["competidor"] = {
+        "_id": "competidor",
+        "content": "otro texto",
+        "checksum": "abc123",
+    }
+    repository = DocumentRepository(FakeConnection(collection))
+    await repository.ensure_indexes()
+
+    with pytest.raises(DuplicateDocumentError):
+        await repository.create("doc-1", "primero", "abc123")
+
+    assert list(collection.docs) == ["competidor"]
+
+
+@pytest.mark.anyio
+async def test_create_allows_duplicate_checksum_without_unique_index(repository, collection):
+    """Sin el índice creado, la garantía es solo el find_one del repositorio."""
+    await repository.create("doc-1", "first", "abc123")
+    await repository.ensure_indexes()
+
+    created = await repository.create("doc-2", "second", "def456")
+
+    assert created["checksum"] == "def456"
+    assert sorted(collection.docs) == ["doc-1", "doc-2"]
+
+
+@pytest.mark.anyio
+async def test_concurrent_create_with_same_checksum_keeps_one_document():
+    """Dos requests concurrentes con el mismo checksum: una entra, la otra es duplicado.
+
+    Sin el índice único las dos pasarían el `find_one` y quedarían dos
+    documentos con el mismo checksum, que es exactamente lo que el dedup
+    tiene que impedir.
+    """
+    collection = RacingCollection()
+    repository = DocumentRepository(FakeConnection(collection))
+    await repository.ensure_indexes()
+
+    results = await asyncio.gather(
+        repository.create("doc-1", "primero", "abc123"),
+        repository.create("doc-2", "segundo", "abc123"),
+        return_exceptions=True,
+    )
+
+    created = [item for item in results if isinstance(item, dict)]
+    duplicates = [item for item in results if isinstance(item, DuplicateDocumentError)]
+
+    assert len(created) == 1
+    assert len(duplicates) == 1
+    assert list(collection.docs) == [created[0]["id"]]
 
 
 @pytest.mark.anyio
@@ -179,8 +279,10 @@ async def test_update_missing_document_raises_not_found(repository):
 
 @pytest.mark.anyio
 async def test_update_without_fields_raises_invalid_update(repository):
-    with pytest.raises(InvalidUpdateError):
+    with pytest.raises(InvalidUpdateError) as raised:
         await repository.update("doc-1", None, None)
+
+    assert str(raised.value) == "No fields to update"
 
 
 @pytest.mark.anyio

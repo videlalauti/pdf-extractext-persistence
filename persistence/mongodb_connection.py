@@ -7,7 +7,6 @@ from pydantic_settings import BaseSettings
 
 
 class MongoSettings(BaseSettings):
-    database_url: str | None = None
     mongodb_root_username: str = "admin"
     mongodb_root_password: str = "changeme"
     mongodb_host: str = "mongo"
@@ -16,19 +15,13 @@ class MongoSettings(BaseSettings):
     mongodb_auth_source: str = "admin"
 
     def build_url(self) -> str:
-        if self.database_url:
-            return self.database_url
-
         user = self.mongodb_root_username
+        password = self.mongodb_root_password
         host = self.mongodb_host
         port = self.mongodb_port
         db_name = self.mongodb_database_name
-
-        if user:
-            password = self.mongodb_root_password
-            auth_source = self.mongodb_auth_source
-            return f"mongodb://{user}:{password}@{host}:{port}/{db_name}?authSource={auth_source}"
-        return f"mongodb://{host}:{port}/{db_name}"
+        auth_source = self.mongodb_auth_source
+        return f"mongodb://{user}:{password}@{host}:{port}/{db_name}?authSource={auth_source}"
 
 
 class MongoDBConnection:

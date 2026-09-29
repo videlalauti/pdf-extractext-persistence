@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import pytest
+
 from persistence.exceptions import DocumentNotFoundError, InvalidUpdateError
 from persistence.repository import DocumentRepository
 

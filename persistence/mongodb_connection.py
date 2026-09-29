@@ -1,6 +1,6 @@
 """Conexión a MongoDB: configuración vía pydantic-settings y ciclo de vida."""
 
-from typing import Optional
+from typing import Optional, Self
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pydantic_settings import BaseSettings
@@ -36,7 +36,7 @@ class MongoDBConnection:
 
     _instance: Optional["MongoDBConnection"] = None
 
-    def __new__(cls) -> "MongoDBConnection":
+    def __new__(cls) -> Self:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance

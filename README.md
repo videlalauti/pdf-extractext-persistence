@@ -17,7 +17,14 @@ uvicorn main:app --reload --port 8003
 ## Cómo correr los tests
 
 ```bash
+pip install -r requirements-dev.txt
 pytest tests/ -v
+```
+
+## Lint
+
+```bash
+ruff check .
 ```
 
 ## Variables de entorno

@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
+from pymongo.errors import PyMongoError
+
 from persistence.mongodb_connection import mongodb_connection
 from routes import router
 
@@ -22,7 +24,7 @@ app = FastAPI(title="Document Persistence Service", version="1.0.0", lifespan=li
 async def health():
     try:
         await mongodb_connection.connect()
-    except Exception:
+    except PyMongoError:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"status": "unhealthy"},

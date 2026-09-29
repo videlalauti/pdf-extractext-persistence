@@ -4,10 +4,11 @@ from collections.abc import Awaitable
 from typing import TypeVar
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
+
 from persistence.exceptions import DocumentNotFoundError, InvalidUpdateError
 from persistence.mongodb_connection import MongoDBConnection
 from persistence.repository import DocumentRepository
-from pydantic import BaseModel
 
 router = APIRouter()
 

@@ -1,11 +1,12 @@
 """Tests del persistence service con un repository fake en memoria."""
 
 import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock, MagicMock
+from pymongo.errors import ServerSelectionTimeoutError
 
 import main
 import routes
@@ -45,7 +46,6 @@ def _make_fake_repo():
         if document_id not in store:
             raise HTTPException(status_code=404, detail="Document not found")
         del store[document_id]
-        return None
 
     repo.create = AsyncMock(side_effect=create)
     repo.list_all = AsyncMock(side_effect=list_all)
@@ -74,7 +74,7 @@ def test_health_check_unhealthy_when_mongo_down(monkeypatch):
     monkeypatch.setattr(
         main.mongodb_connection,
         "connect",
-        AsyncMock(side_effect=ConnectionError("mongo unreachable")),
+        AsyncMock(side_effect=ServerSelectionTimeoutError("mongo unreachable")),
     )
 
     response = client.get("/health")

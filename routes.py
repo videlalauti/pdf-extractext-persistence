@@ -72,6 +72,13 @@ async def get_documents() -> list[DocumentResponse]:
     ]
 
 
+@router.get("/documents/by-checksum/{checksum}", response_model=DocumentResponse)
+async def get_document_by_checksum(checksum: str) -> DocumentResponse:
+    return DocumentResponse(
+        **await _translate_domain_errors(repository.get_by_checksum(checksum))
+    )
+
+
 @router.get("/documents/{document_id}", response_model=DocumentResponse)
 async def get_document(document_id: str) -> DocumentResponse:
     return DocumentResponse(

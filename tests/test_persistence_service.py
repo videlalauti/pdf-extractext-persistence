@@ -35,6 +35,12 @@ def _make_fake_repo():
             raise DocumentNotFoundError(document_id)
         return store[document_id]
 
+    async def get_by_checksum(checksum):
+        for doc in store.values():
+            if doc["checksum"] == checksum:
+                return doc
+        raise DocumentNotFoundError()
+
     async def update(document_id, content=None, checksum=None):
         if document_id not in store:
             raise DocumentNotFoundError(document_id)
@@ -52,6 +58,7 @@ def _make_fake_repo():
     repo.create = AsyncMock(side_effect=create)
     repo.list_all = AsyncMock(side_effect=list_all)
     repo.get = AsyncMock(side_effect=get)
+    repo.get_by_checksum = AsyncMock(side_effect=get_by_checksum)
     repo.update = AsyncMock(side_effect=update)
     repo.delete = AsyncMock(side_effect=delete)
     repo._store = store
@@ -115,6 +122,21 @@ def test_list_documents():
 
 def test_get_document_not_found():
     response = client.get("/documents/nonexistent-id")
+    assert response.status_code == 404
+
+
+def test_get_document_by_checksum():
+    created = client.post(
+        "/documents", json={"content": "extracted text", "checksum": "abc123"}
+    ).json()
+
+    response = client.get("/documents/by-checksum/abc123")
+    assert response.status_code == 200
+    assert response.json()["id"] == created["id"]
+
+
+def test_get_document_by_checksum_not_found():
+    response = client.get("/documents/by-checksum/unknown-checksum")
     assert response.status_code == 404
 
 

@@ -129,6 +129,24 @@ async def test_get_missing_document_raises_not_found(repository):
 
 
 @pytest.mark.anyio
+async def test_get_by_checksum_returns_document(repository):
+    await repository.create("doc-1", "hello", "abc123")
+    await repository.create("doc-2", "bye", "def456")
+
+    assert await repository.get_by_checksum("def456") == {
+        "id": "doc-2",
+        "content": "bye",
+        "checksum": "def456",
+    }
+
+
+@pytest.mark.anyio
+async def test_get_by_checksum_missing_raises_not_found(repository):
+    with pytest.raises(DocumentNotFoundError):
+        await repository.get_by_checksum("unknown-checksum")
+
+
+@pytest.mark.anyio
 async def test_list_all_returns_every_document(repository):
     await repository.create("doc-1", "first", "aaa")
     await repository.create("doc-2", "second", "bbb")

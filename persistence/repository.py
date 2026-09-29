@@ -48,6 +48,12 @@ class DocumentRepository:
             raise DocumentNotFoundError(document_id)
         return self._to_dict(data)
 
+    async def get_by_checksum(self, checksum: str) -> dict:
+        data = await self._collection.find_one({"checksum": checksum})
+        if not data:
+            raise DocumentNotFoundError()
+        return self._to_dict(data)
+
     async def update(self, document_id: str, content: str | None, checksum: str | None) -> dict:
         update_data = {
             k: v for k, v in {"content": content, "checksum": checksum}.items() if v is not None

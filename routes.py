@@ -1,11 +1,17 @@
 """Persistence service: endpoints HTTP CRUD delegando en DocumentRepository."""
 
-from fastapi import APIRouter, status
+from collections.abc import Awaitable
+from typing import TypeVar
+
+from fastapi import APIRouter, HTTPException, status
+from persistence.exceptions import DocumentNotFoundError, InvalidUpdateError
 from persistence.mongodb_connection import MongoDBConnection
 from persistence.repository import DocumentRepository
 from pydantic import BaseModel
 
 router = APIRouter()
+
+T = TypeVar("T")
 
 
 class DocumentCreate(BaseModel):
@@ -28,28 +34,51 @@ class DocumentResponse(BaseModel):
 repository = DocumentRepository(MongoDBConnection())
 
 
+async def _translate_domain_errors(operation: Awaitable[T]) -> T:
+    """Traduce las excepciones de dominio de la persistencia a HTTPException."""
+    try:
+        return await operation
+    except DocumentNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(error)
+        ) from error
+    except InvalidUpdateError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+
+
 @router.post("/documents", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
 async def create_document(doc: DocumentCreate) -> DocumentResponse:
-    return DocumentResponse(**await repository.create(doc.id, doc.content, doc.checksum))
+    return DocumentResponse(
+        **await _translate_domain_errors(repository.create(doc.id, doc.content, doc.checksum))
+    )
 
 
 @router.get("/documents", response_model=list[DocumentResponse])
 async def get_documents() -> list[DocumentResponse]:
-    return [DocumentResponse(**document) for document in await repository.list_all()]
+    return [
+        DocumentResponse(**document)
+        for document in await _translate_domain_errors(repository.list_all())
+    ]
 
 
 @router.get("/documents/{document_id}", response_model=DocumentResponse)
 async def get_document(document_id: str) -> DocumentResponse:
-    return DocumentResponse(**await repository.get(document_id))
+    return DocumentResponse(
+        **await _translate_domain_errors(repository.get(document_id))
+    )
 
 
 @router.put("/documents/{document_id}", response_model=DocumentResponse)
 async def update_document(document_id: str, doc_update: DocumentUpdate) -> DocumentResponse:
     return DocumentResponse(
-        **await repository.update(document_id, doc_update.content, doc_update.checksum)
+        **await _translate_domain_errors(
+            repository.update(document_id, doc_update.content, doc_update.checksum)
+        )
     )
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(document_id: str) -> None:
-    await repository.delete(document_id)
+    await _translate_domain_errors(repository.delete(document_id))

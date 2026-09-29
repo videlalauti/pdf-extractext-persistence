@@ -2,7 +2,8 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, status
+from fastapi.responses import JSONResponse
 from persistence.mongodb_connection import mongodb_connection
 from routes import router
 
@@ -19,6 +20,13 @@ app = FastAPI(title="Document Persistence Service", version="1.0.0", lifespan=li
 
 @app.get("/health")
 async def health():
+    try:
+        await mongodb_connection.connect()
+    except Exception:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "unhealthy"},
+        )
     return {"status": "healthy", "service": "persistence-service"}
 
 

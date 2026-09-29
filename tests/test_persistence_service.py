@@ -7,10 +7,10 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, MagicMock
 
+import main
 import routes
-from main import app
 
-client = TestClient(app)
+client = TestClient(main.app)
 
 
 def _make_fake_repo():
@@ -57,15 +57,29 @@ def _make_fake_repo():
 
 
 @pytest.fixture(autouse=True)
-def fake_repository():
+def fake_repository(monkeypatch):
     routes.repository = _make_fake_repo()
+    monkeypatch.setattr(main.mongodb_connection, "connect", AsyncMock(return_value=None))
     yield
 
 
 def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
     assert response.json()["service"] == "persistence-service"
+
+
+def test_health_check_unhealthy_when_mongo_down(monkeypatch):
+    monkeypatch.setattr(
+        main.mongodb_connection,
+        "connect",
+        AsyncMock(side_effect=ConnectionError("mongo unreachable")),
+    )
+
+    response = client.get("/health")
+    assert response.status_code == 503
+    assert response.json() == {"status": "unhealthy"}
 
 
 def test_create_and_get_document():

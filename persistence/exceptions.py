@@ -18,3 +18,11 @@ class InvalidUpdateError(PersistenceError):
 
     def __init__(self) -> None:
         super().__init__("No fields to update")
+
+
+class DuplicateDocumentError(PersistenceError):
+    """Ya existe un documento con el mismo checksum."""
+
+    def __init__(self, checksum: str) -> None:
+        self.checksum = checksum
+        super().__init__(f"Document with checksum {checksum} already exists")

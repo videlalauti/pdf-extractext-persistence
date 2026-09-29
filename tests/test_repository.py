@@ -4,7 +4,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from persistence.exceptions import DocumentNotFoundError, InvalidUpdateError
+from persistence.exceptions import (
+    DocumentNotFoundError,
+    DuplicateDocumentError,
+    InvalidUpdateError,
+)
 from persistence.repository import DocumentRepository
 
 
@@ -29,8 +33,10 @@ class FakeCollection:
         self.docs[str(document["_id"])] = dict(document)
 
     async def find_one(self, query: dict) -> dict | None:
-        found = self.docs.get(str(query["_id"]))
-        return dict(found) if found else None
+        for document in self.docs.values():
+            if all(document.get(key) == value for key, value in query.items()):
+                return dict(document)
+        return None
 
     async def find(self, query: dict | None = None):
         for document in list(self.docs.values()):
@@ -82,6 +88,27 @@ async def test_create_uses_provided_id(repository):
     created = await repository.create("custom-id", "text", "abc123")
 
     assert created["id"] == "custom-id"
+
+
+@pytest.mark.anyio
+async def test_create_duplicate_checksum_raises_duplicate(repository, collection):
+    await repository.create("doc-1", "first", "abc123")
+
+    with pytest.raises(DuplicateDocumentError):
+        await repository.create("doc-2", "second", "abc123")
+
+    assert list(collection.docs) == ["doc-1"]
+
+
+@pytest.mark.anyio
+async def test_create_allows_different_checksum(repository):
+    await repository.create("doc-1", "first", "aaa")
+    await repository.create("doc-2", "second", "bbb")
+
+    assert await repository.list_all() == [
+        {"id": "doc-1", "content": "first", "checksum": "aaa"},
+        {"id": "doc-2", "content": "second", "checksum": "bbb"},
+    ]
 
 
 @pytest.mark.anyio

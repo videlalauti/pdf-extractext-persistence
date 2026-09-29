@@ -4,7 +4,11 @@ import uuid
 
 from motor.motor_asyncio import AsyncIOMotorCollection
 
-from persistence.exceptions import DocumentNotFoundError, InvalidUpdateError
+from persistence.exceptions import (
+    DocumentNotFoundError,
+    DuplicateDocumentError,
+    InvalidUpdateError,
+)
 from persistence.mongodb_connection import MongoDBConnection
 
 
@@ -23,6 +27,9 @@ class DocumentRepository:
         return connection.get_database()[collection_name]
 
     async def create(self, doc_id: str | None, content: str, checksum: str) -> dict:
+        if await self._collection.find_one({"checksum": checksum}):
+            raise DuplicateDocumentError(checksum)
+
         document_id = doc_id or str(uuid.uuid4())
         await self._collection.insert_one(
             {"_id": document_id, "content": content, "checksum": checksum}

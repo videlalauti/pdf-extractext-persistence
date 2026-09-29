@@ -6,7 +6,11 @@ from typing import TypeVar
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from persistence.exceptions import DocumentNotFoundError, InvalidUpdateError
+from persistence.exceptions import (
+    DocumentNotFoundError,
+    DuplicateDocumentError,
+    InvalidUpdateError,
+)
 from persistence.mongodb_connection import MongoDBConnection
 from persistence.repository import DocumentRepository
 
@@ -46,6 +50,10 @@ async def _translate_domain_errors(operation: Awaitable[T]) -> T:
     except InvalidUpdateError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
+        ) from error
+    except DuplicateDocumentError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(error)
         ) from error
 
 

@@ -4,12 +4,12 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pymongo.errors import ServerSelectionTimeoutError
 
 import main
 import routes
+from persistence.exceptions import DocumentNotFoundError, DuplicateDocumentError
 
 client = TestClient(main.app)
 
@@ -20,6 +20,8 @@ def _make_fake_repo():
     store = {}
 
     async def create(doc_id, content, checksum):
+        if any(doc["checksum"] == checksum for doc in store.values()):
+            raise DuplicateDocumentError(checksum)
         document_id = doc_id or str(uuid.uuid4())
         doc = {"id": document_id, "content": content, "checksum": checksum}
         store[document_id] = doc
@@ -30,12 +32,12 @@ def _make_fake_repo():
 
     async def get(document_id):
         if document_id not in store:
-            raise HTTPException(status_code=404, detail="Document not found")
+            raise DocumentNotFoundError(document_id)
         return store[document_id]
 
     async def update(document_id, content=None, checksum=None):
         if document_id not in store:
-            raise HTTPException(status_code=404, detail="Document not found")
+            raise DocumentNotFoundError(document_id)
         if content is not None:
             store[document_id]["content"] = content
         if checksum is not None:
@@ -44,7 +46,7 @@ def _make_fake_repo():
 
     async def delete(document_id):
         if document_id not in store:
-            raise HTTPException(status_code=404, detail="Document not found")
+            raise DocumentNotFoundError(document_id)
         del store[document_id]
 
     repo.create = AsyncMock(side_effect=create)
@@ -91,6 +93,15 @@ def test_create_and_get_document():
     get_response = client.get(f"/documents/{created['id']}")
     assert get_response.status_code == 200
     assert get_response.json()["id"] == created["id"]
+
+
+def test_create_duplicate_checksum_returns_conflict():
+    first = client.post("/documents", json={"content": "extracted text", "checksum": "abc123"})
+    assert first.status_code == 201
+
+    duplicate = client.post("/documents", json={"content": "other text", "checksum": "abc123"})
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "Document with checksum abc123 already exists"
 
 
 def test_list_documents():

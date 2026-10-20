@@ -1,11 +1,14 @@
 """Tests del persistence service con un repository fake en memoria."""
 
+import io
+import logging
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 from pymongo.errors import ServerSelectionTimeoutError
+from shared.web.logging import RequestIdFormatter, RequestIdMiddleware, TimingMiddleware
 
 import main
 from persistence.exceptions import (
@@ -226,3 +229,61 @@ def test_cors_preflight_allows_configured_origin():
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost"
+
+
+def _middleware_classes() -> list[type]:
+    """Clases del stack de la app, de afuera hacia adentro."""
+    return [entry.cls for entry in main.app.user_middleware]
+
+
+def test_timing_middleware_is_registered():
+    assert TimingMiddleware in _middleware_classes()
+
+
+def test_timing_middleware_runs_inside_request_id():
+    """Request-id va afuera para que el ContextVar del request_id esté seteado
+    cuando el timing emite su log (si no, el `request_id` saldría vacío)."""
+    classes = _middleware_classes()
+    assert classes.index(RequestIdMiddleware) < classes.index(TimingMiddleware)
+
+
+def test_timing_log_carries_the_request_id():
+    """Prueba de comportamiento: el log `request completed` hereda el request-id.
+
+    El formatter resuelve el request-id del ContextVar al formatear, así que un
+    handler temporal con el formatter real del servicio alcanza para verificar
+    que TimingMiddleware corre por dentro de RequestIdMiddleware.
+    """
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(RequestIdFormatter("persistence-service"))
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        client.get("/health", headers={"X-Request-Id": "trace-timing-42"})
+    finally:
+        root.removeHandler(handler)
+
+    lines = [
+        line
+        for line in stream.getvalue().splitlines()
+        if "request completed" in line
+    ]
+    assert len(lines) == 1, f"se esperaba un log de timing: {lines}"
+    assert "trace-timing-42" in lines[0]
+
+
+def test_timing_log_records_request_details(caplog):
+    """El middleware loguea method, path, status_code y duration_ms por request."""
+    with caplog.at_level(logging.INFO):
+        response = client.get("/health")
+
+    records = [r for r in caplog.records if r.getMessage() == "request completed"]
+    assert len(records) == 1, f"se esperaba un log de timing: {records}"
+
+    record = records[0]
+    assert record.method == "GET"
+    assert record.path == "/health"
+    assert record.status_code == response.status_code
+    assert isinstance(record.duration_ms, float)
+    assert record.duration_ms >= 0

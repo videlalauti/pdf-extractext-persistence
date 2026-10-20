@@ -6,7 +6,7 @@ from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError
 from shared.web.cors import add_cors
-from shared.web.logging import RequestIdMiddleware, setup_logging
+from shared.web.logging import RequestIdMiddleware, TimingMiddleware, setup_logging
 
 from persistence.mongodb_connection import mongodb_connection
 from routes import get_repository, router
@@ -27,6 +27,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Document Persistence Service", version="1.0.0", lifespan=lifespan)
 
 add_cors(app)
+# Starlette evalúa los middlewares al revés del registro: el último que se
+# agrega queda el más afuera. RequestId va al final para envolver al Timing
+# y que el log de duración herede el request_id del ContextVar.
+app.add_middleware(TimingMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 

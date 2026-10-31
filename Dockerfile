@@ -1,25 +1,24 @@
-# python:3.14-slim-bookworm (3.14.7) fijado por digest para builds reproducibles.
-# Actualizar con: docker buildx imagetools inspect python:3.14-slim-bookworm
-FROM python:3.14-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56
+# syntax=docker/dockerfile:1.7
 
-RUN useradd --create-home --shell /usr/sbin/nologin appuser
+FROM python:3.13-slim-trixie AS build
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /usr/local/bin/uv
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0
 
+FROM build AS deps
 WORKDIR /app
+COPY requirements.txt requirements.lock.txt ./
+RUN ln -sf /usr/local/bin/python /usr/bin/python \
+ && uv venv --python /usr/bin/python /opt/venv \
+ && uv pip install --python /opt/venv/bin/python -r requirements.lock.txt
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY main.py .
-COPY routes.py .
-COPY persistence/ persistence/
-
-USER appuser
-
+FROM gcr.io/distroless/python3-debian13:nonroot@sha256:64e54c4b1200da244d80181d98e86fc01d73c8101f107d5baf472152d8e119a2
+WORKDIR /app
+COPY --from=deps /opt/venv /opt/venv
+COPY main.py routes.py ./
+COPY persistence/ ./persistence/
+ENV PATH="/opt/venv/bin:$PATH"
 EXPOSE 8000
-
-# /health ya hace ping a Mongo, asi que un 503 aqui es "Mongo no responde".
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/health')"]
-
-# Forma shell (no exec) para que el puerto venga del entorno (12-Factor VII).
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+    CMD ["/usr/bin/python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/health', timeout=4)"]
+ENTRYPOINT ["/opt/venv/bin/python"]
+CMD ["-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

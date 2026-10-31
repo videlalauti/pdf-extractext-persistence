@@ -70,3 +70,8 @@ El servicio necesita las siguientes variables de entorno (ver `.env.example`):
   `app.dependency_overrides`.
 - **Observabilidad:** los logs van a stdout con `request_id`, tomado del header
   `X-Request-Id` (o generado) vía `pdf-extractext-shared`.
+- **Deuda técnica — `motor` deprecado:** Motor queda deprecado el 14/05/2026
+  (un año después del release de producción del driver async de PyMongo) y
+  recibe bug fixes críticos hasta el 14/05/2027. La migración recomendada es al
+  driver async de PyMongo. Se mantiene `motor==3.7.1`; migrar queda fuera de
+  alcance.

@@ -295,10 +295,16 @@ def test_timing_log_records_request_details(caplog):
     with caplog.at_level(logging.INFO):
         response = client.get("/health")
 
-    records = [r for r in caplog.records if r.getMessage() == "request completed"]
+    records = [
+        r for r in caplog.records if r.getMessage().startswith("request completed")
+    ]
     assert len(records) == 1, f"se esperaba un log de timing: {records}"
 
     record = records[0]
+    # shared v1.3.0 renderiza los campos también en el mensaje (no solo en extra).
+    assert "method=GET" in record.getMessage()
+    assert "path=/health" in record.getMessage()
+    assert "duration_ms=" in record.getMessage()
     assert record.method == "GET"
     assert record.path == "/health"
     assert record.status_code == response.status_code

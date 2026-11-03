@@ -12,7 +12,7 @@ por `checksum` (SHA-256 de los bytes del PDF, que es la identidad de duplicado).
 | `GET` | `/documents` | `200` lista |
 | `GET` | `/documents/by-checksum/{checksum}` | `200` · `404` |
 | `GET` | `/documents/{id}` | `200` · `404` |
-| `PUT` | `/documents/{id}` | `200` · `400` sin campos · `404` |
+| `PUT` | `/documents/{id}` | `200` · `400` sin campos · `404` · `409` checksum duplicado |
 | `DELETE` | `/documents/{id}` | `204` · `404` |
 | `GET` | `/health` | `200` healthy · `503` si Mongo no responde |
 
@@ -30,6 +30,9 @@ pip install -r requirements.txt
 ```bash
 uvicorn main:app --reload --port 8003
 ```
+
+En un contenedor arranca `entrypoint.py`, que lee `PORT` (default `8000`); el
+`HEALTHCHECK` del `Dockerfile` consulta ese mismo puerto.
 
 ## Cómo correr los tests
 
@@ -64,7 +67,8 @@ El servicio necesita las siguientes variables de entorno (ver `.env.example`):
 - **Deduplicación sin carrera:** en el arranque se crea el índice único de
   `checksum` (`DocumentRepository.ensure_indexes`). El `find_one` previo en
   `create` es solo el camino rápido; la garantía real es el índice, y un
-  `DuplicateKeyError` se traduce a `DuplicateDocumentError` → `409`.
+  `DuplicateKeyError` se traduce a `DuplicateDocumentError` → `409`. En
+  `update` se usa un único `find_one_and_update` atómico por el mismo motivo.
 - **Inyección de dependencias:** el router no instancia el repositorio;
   lo recibe por `Depends(get_repository)` y los tests lo sustituyen con
   `app.dependency_overrides`.

@@ -26,5 +26,5 @@ jobs:
       - name: Lint with ruff
         run: ruff check .
 
-      - name: Run tests
-        run: pytest tests/ -v
+      - name: Tests con pytest
+        run: pytest tests/ -v --cov=. --cov-report=term-missing --cov-fail-under=80

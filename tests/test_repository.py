@@ -58,12 +58,39 @@ class FakeCollection:
         for document in list(self.docs.values()):
             yield dict(document)
 
+    def _ensure_unique_checksum(self, document_id: str, checksum: str) -> None:
+        """Aplica el índice único como Mongo: otro documento no puede repetirlo."""
+        if not self.indexes.get("checksum"):
+            return
+        if any(
+            other_id != document_id and document.get("checksum") == checksum
+            for other_id, document in self.docs.items()
+        ):
+            raise DuplicateKeyError(f"checksum {checksum} ya indexado")
+
     async def update_one(self, query: dict, update: dict) -> _FakeUpdateResult:
-        document = self.docs.get(str(query["_id"]))
+        document_id = str(query["_id"])
+        document = self.docs.get(document_id)
         if not document:
             return _FakeUpdateResult(matched_count=0)
+        new_checksum = update["$set"].get("checksum")
+        if new_checksum is not None:
+            self._ensure_unique_checksum(document_id, new_checksum)
         document.update(update["$set"])
         return _FakeUpdateResult(matched_count=1, modified_count=1)
+
+    async def find_one_and_update(
+        self, query: dict, update: dict, return_document=None
+    ) -> dict | None:
+        document_id = str(query["_id"])
+        document = self.docs.get(document_id)
+        if not document:
+            return None
+        new_checksum = update["$set"].get("checksum")
+        if new_checksum is not None:
+            self._ensure_unique_checksum(document_id, new_checksum)
+        document.update(update["$set"])
+        return dict(document)
 
     async def delete_one(self, query: dict) -> _FakeDeleteResult:
         existed = self.docs.pop(str(query["_id"]), None) is not None
@@ -273,8 +300,36 @@ async def test_update_partial_keeps_other_fields(repository):
 
 @pytest.mark.anyio
 async def test_update_missing_document_raises_not_found(repository):
+    """El documento pudo borrarse entre la lectura y el update atómico."""
     with pytest.raises(DocumentNotFoundError):
         await repository.update("nonexistent-id", "bye", None)
+
+
+@pytest.mark.anyio
+async def test_update_duplicate_checksum_raises_duplicate(repository):
+    """El índice único corta el update: no puede quedar un checksum repetido."""
+    await repository.create("doc-1", "first", "aaa")
+    await repository.create("doc-2", "second", "bbb")
+    await repository.ensure_indexes()
+
+    with pytest.raises(DuplicateDocumentError):
+        await repository.update("doc-2", None, "aaa")
+
+    assert await repository.get("doc-2") == {
+        "id": "doc-2",
+        "content": "second",
+        "checksum": "bbb",
+    }
+
+
+@pytest.mark.anyio
+async def test_update_with_same_checksum_does_not_collide_with_itself(repository):
+    await repository.create("doc-1", "first", "aaa")
+    await repository.ensure_indexes()
+
+    updated = await repository.update("doc-1", "changed", "aaa")
+
+    assert updated == {"id": "doc-1", "content": "changed", "checksum": "aaa"}
 
 
 @pytest.mark.anyio

@@ -3,6 +3,7 @@
 import uuid
 
 from motor.motor_asyncio import AsyncIOMotorCollection
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from persistence.exceptions import (
@@ -76,11 +77,23 @@ class DocumentRepository:
         if not update_data:
             raise InvalidUpdateError()
 
-        result = await self._collection.update_one({"_id": document_id}, {"$set": update_data})
-        if result.matched_count == 0:
+        try:
+            # Una sola operación atómica: además de devolver el documento ya
+            # actualizado, evita la ventana en la que un borrado concurrente
+            # hacía que el `find_one` posterior devolviera `None`.
+            data = await self._collection.find_one_and_update(
+                {"_id": document_id},
+                {"$set": update_data},
+                return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError as error:
+            # El índice único de checksum es la garantía real del dedup: si el
+            # nuevo checksum ya existe, Mongo corta el update acá.
+            raise DuplicateDocumentError(checksum or "") from error
+
+        if data is None:
             raise DocumentNotFoundError(document_id)
 
-        data = await self._collection.find_one({"_id": document_id})
         return self._to_dict(data)
 
     async def delete(self, document_id: str) -> None:

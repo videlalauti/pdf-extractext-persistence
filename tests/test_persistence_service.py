@@ -66,6 +66,11 @@ def _make_fake_repo():
     async def update(document_id, content=None, checksum=None):
         if document_id not in store:
             raise DocumentNotFoundError(document_id)
+        if checksum is not None and any(
+            other_id != document_id and doc["checksum"] == checksum
+            for other_id, doc in store.items()
+        ):
+            raise DuplicateDocumentError(checksum)
         if content is not None:
             store[document_id]["content"] = content
         if checksum is not None:
@@ -145,6 +150,18 @@ def test_create_duplicate_checksum_returns_conflict():
     duplicate = client.post("/documents", json={"content": "other text", "checksum": "abc123"})
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"] == "Document with checksum abc123 already exists"
+
+
+def test_update_duplicate_checksum_returns_conflict():
+    first = client.post("/documents", json={"content": "first", "checksum": "aaa"}).json()
+    second = client.post("/documents", json={"content": "second", "checksum": "bbb"}).json()
+
+    response = client.put(f"/documents/{second['id']}", json={"checksum": "aaa"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Document with checksum aaa already exists"
+    assert client.get(f"/documents/{second['id']}").json()["checksum"] == "bbb"
+    assert client.get(f"/documents/{first['id']}").json()["checksum"] == "aaa"
 
 
 def test_list_documents():

@@ -212,6 +212,20 @@ def test_lifespan_creates_unique_checksum_index(mongo_collection):
     assert mongo_collection.indexes == [("checksum", True)]
 
 
+def test_lifespan_cierra_mongo_si_falla_crear_indices(monkeypatch, mongo_collection):
+    monkeypatch.setattr(
+        mongo_collection,
+        "create_index",
+        AsyncMock(side_effect=RuntimeError("index unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="index unavailable"):
+        with TestClient(main.app):
+            pass
+
+    main.mongodb_connection.disconnect.assert_awaited_once()
+
+
 def test_unknown_domain_error_becomes_500(fake_repository):
     fake_repository.get.side_effect = UnknownDomainError("algo nuevo")
 

@@ -18,10 +18,13 @@ setup_logging(SERVICE_NAME)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await mongodb_connection.connect()
-    await get_repository().ensure_indexes()
-    yield
-    await mongodb_connection.disconnect()
+    try:
+        await mongodb_connection.connect()
+        await get_repository().ensure_indexes()
+        yield
+    finally:
+        # Cerrar el cliente también si falla la creación de índices al arrancar.
+        await mongodb_connection.disconnect()
 
 
 app = FastAPI(title="Document Persistence Service", version="1.0.0", lifespan=lifespan)

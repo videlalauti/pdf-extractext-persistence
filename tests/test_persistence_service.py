@@ -219,9 +219,8 @@ def test_lifespan_cierra_mongo_si_falla_crear_indices(monkeypatch, mongo_collect
         AsyncMock(side_effect=RuntimeError("index unavailable")),
     )
 
-    with pytest.raises(RuntimeError, match="index unavailable"):
-        with TestClient(main.app):
-            pass
+    with pytest.raises(RuntimeError, match="index unavailable"), TestClient(main.app):
+        pass
 
     main.mongodb_connection.disconnect.assert_awaited_once()
 

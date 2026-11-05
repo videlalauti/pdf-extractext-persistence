@@ -1,4 +1,4 @@
-"""Persistence service: endpoints HTTP CRUD delegando en DocumentRepository."""
+"""Capa HTTP CRUD: delega casos de uso a DocumentService."""
 
 import logging
 from collections.abc import Awaitable
@@ -15,6 +15,7 @@ from persistence.exceptions import (
 )
 from persistence.mongodb_connection import mongodb_connection
 from persistence.repository import DocumentRepository
+from persistence.service import DocumentService
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,14 @@ def get_repository() -> DocumentRepository:
 RepositoryDependency = Annotated[DocumentRepository, Depends(get_repository)]
 
 
+def get_document_service(repository: RepositoryDependency) -> DocumentService:
+    """Inyecta los casos de uso, manteniendo el repositorio sustituible en tests."""
+    return DocumentService(repository)
+
+
+DocumentServiceDependency = Annotated[DocumentService, Depends(get_document_service)]
+
+
 async def _translate_domain_errors(operation: Awaitable[T]) -> T:
     """Traduce las excepciones de dominio de la persistencia a HTTPException.
 
@@ -91,40 +100,40 @@ async def _translate_domain_errors(operation: Awaitable[T]) -> T:
 @router.post("/documents", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
 async def create_document(
     doc: DocumentCreate,
-    repository: RepositoryDependency,
+    service: DocumentServiceDependency,
 ) -> DocumentResponse:
     return DocumentResponse(
-        **await _translate_domain_errors(repository.create(doc.id, doc.content, doc.checksum))
+        **await _translate_domain_errors(service.create(doc.id, doc.content, doc.checksum))
     )
 
 
 @router.get("/documents", response_model=list[DocumentResponse])
 async def get_documents(
-    repository: RepositoryDependency,
+    service: DocumentServiceDependency,
 ) -> list[DocumentResponse]:
     return [
         DocumentResponse(**document)
-        for document in await _translate_domain_errors(repository.list_all())
+        for document in await _translate_domain_errors(service.list_all())
     ]
 
 
 @router.get("/documents/by-checksum/{checksum}", response_model=DocumentResponse)
 async def get_document_by_checksum(
     checksum: str,
-    repository: RepositoryDependency,
+    service: DocumentServiceDependency,
 ) -> DocumentResponse:
     return DocumentResponse(
-        **await _translate_domain_errors(repository.get_by_checksum(checksum))
+        **await _translate_domain_errors(service.get_by_checksum(checksum))
     )
 
 
 @router.get("/documents/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: str,
-    repository: RepositoryDependency,
+    service: DocumentServiceDependency,
 ) -> DocumentResponse:
     return DocumentResponse(
-        **await _translate_domain_errors(repository.get(document_id))
+        **await _translate_domain_errors(service.get(document_id))
     )
 
 
@@ -132,11 +141,11 @@ async def get_document(
 async def update_document(
     document_id: str,
     doc_update: DocumentUpdate,
-    repository: RepositoryDependency,
+    service: DocumentServiceDependency,
 ) -> DocumentResponse:
     return DocumentResponse(
         **await _translate_domain_errors(
-            repository.update(document_id, doc_update.content, doc_update.checksum)
+            service.update(document_id, doc_update.content, doc_update.checksum)
         )
     )
 
@@ -144,6 +153,6 @@ async def update_document(
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: str,
-    repository: RepositoryDependency,
+    service: DocumentServiceDependency,
 ) -> None:
-    await _translate_domain_errors(repository.delete(document_id))
+    await _translate_domain_errors(service.delete(document_id))

@@ -8,6 +8,7 @@ from pymongo.errors import PyMongoError
 from shared.web.cors import add_cors
 from shared.web.logging import RequestIdMiddleware, TimingMiddleware, setup_logging
 
+from consul_runtime import ConsulRuntime
 from persistence.mongodb_connection import mongodb_connection
 from routes import get_repository, router
 
@@ -18,11 +19,14 @@ setup_logging(SERVICE_NAME)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    registry = ConsulRuntime(SERVICE_NAME)
     try:
         await mongodb_connection.connect()
         await get_repository().ensure_indexes()
+        await registry.start()
         yield
     finally:
+        await registry.stop()
         # Cerrar el cliente también si falla la creación de índices al arrancar.
         await mongodb_connection.disconnect()
 

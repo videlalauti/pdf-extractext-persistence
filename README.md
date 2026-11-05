@@ -79,3 +79,35 @@ El servicio necesita las siguientes variables de entorno (ver `.env.example`):
   recibe bug fixes críticos hasta el 14/05/2027. La migración recomendada es al
   driver async de PyMongo. Se mantiene `motor==3.7.1`; migrar queda fuera de
   alcance.
+
+
+## Arquitectura N capas y demostracion en MongoDB Compass
+
+- **Presentacion (HTTP):** `routes.py` expone el CRUD, modelos Pydantic y
+  traduce excepciones de dominio a status 201/404/409/400/500.
+- **Aplicacion:** `persistence/service.py` encapsula casos de uso CRUD sobre
+  el puerto `DocumentStore`, sin importar FastAPI ni Mongo.
+- **Acceso a datos:** `persistence/repository.py` implementa el repositorio
+  MongoDB (Motor), maneja el índice único de checksum y el `_id`.
+- **Infraestructura:** `persistence/mongodb_connection.py` configura y
+  conecta MongoDB mediante variables de entorno; `main.py` administra
+  startup, health y cierre de conexion.
+
+**Qué persiste:** el texto extraido como `content`, el identificador
+`_id` (String/UUID) y `checksum` (String/SHA-256). **No guarda el
+binario original del PDF.** Mongo usa un modelo de documentos flexible;
+`Schema` en Compass es una inspeccion de los campos observados, NO un
+validador JSON Schema requerido.
+
+Para demostrar persistencia desde el equipo del expositor:
+
+1. En el repo Infra, `python scripts/dev.py start` y
+   `python scripts/dev.py compass-on`.
+2. En Infra, `python scripts/dev.py upload --unique`.
+3. Compass: URI `mongodb://127.0.0.1:27017/`, usuario/password de
+   `infra/.env` (authSource `admin`).
+4. Abrir `pdf_extractext > documents > Documents`; filtrar por el
+   `_id` que imprime el script; mostrar `content` y `checksum`.
+5. Abrir `Schema` para analizar campos e `Indexes` para mostrar
+   unicidad de `checksum`.
+6. En Infra, `python scripts/dev.py compass-off` para cerrar el puerto.
